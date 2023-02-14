@@ -1,2 +1,2 @@
 # SupplementaryMaterials
-Supplementary information and materials of the research article
+Supplementary information and materials of the research articles
