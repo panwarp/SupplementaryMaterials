@@ -1,0 +1,172 @@
+# THIS IS A SAMPLE of the LAMMPS INPUT SCRIPT TO GENERATE STATE at desired T, P (eqmT, eqmP).
+
+# Setup parameters
+variable            fluid index API636 API637 API638 API639 API640 API641 API642 API643 API644 API645 API646 API647 API648 API649 API650 API651 API652 API653 API654 API655
+variable       		T equal 32 # Equilibrium temperature [F]
+log             	logEQM_${fluid}_T${T}FP1atm.out
+
+# Potential information
+units           	real
+dimension       	3
+boundary        	p p p
+atom_style      	full
+
+pair_style      	lj/cut/coul/cut 12.0 12.0 
+bond_style      	harmonic
+angle_style     	harmonic
+dihedral_style 		opls
+improper_style     	cvff
+pair_modify 		mix geometric tail yes
+special_bonds   	lj/coul 0.0 0.0 0.0
+
+# Read lammps data file consist of molecular topology and forcefield info
+read_data       	${fluid}.txt
+neighbor        	2.0 bin
+neigh_modify 		every 1 delay 0 check yes
+
+# Define variables
+variable        	eqmT equal ($T-459.67)*5/9 			# Equilibrium temperature [K]
+variable        	eqmP equal 1.0						# Equilibrium pressure [atm]
+variable    		p equal 100							# Nrepeat, correlation length
+variable    		s equal 10       					# Nevery, sample interval
+variable    		d equal $s*$p  						# Nfreq, dump interval
+variable 			rho equal density
+
+# Minimize system at target temperature using the default conjugate gradient method
+velocity        	all create ${eqmT} 482648
+fix             	min all nve
+thermo          	10
+thermo_style 		custom step temp press density pxx pyy pzz pxy pxz pyz pe ke etotal evdwl ecoul epair ebond eangle edihed eimp emol etail enthalpy vol
+dump            	1 all custom 10 min_w_${fluid}_T${T}FP1atm.lammpstrj id mol type x y z mass q
+dump            	2 all custom 10 min_u_${fluid}_T${T}FP1atm.lammpstrj id mol type xu yu zu mass q
+dump_modify     	1 sort id
+dump_modify     	2 sort id
+minimize        	1.0e-16 1.06e-6 100000 500000
+undump          	1
+undump          	2
+write_restart   	Min_${fluid}_T${T}FP1atm.restart
+
+unfix           	min
+reset_timestep  	0
+neigh_modify 		every 1 delay 0 check yes
+
+# NVT at high temperature
+fix             	nvt1000K all nvt temp 1000.0 1000.0 100.0
+thermo				$d
+thermo_style 		custom step temp press density pxx pyy pzz pxy pxz pyz pe ke etotal evdwl ecoul epair ebond eangle edihed eimp emol etail enthalpy vol
+fix 				thermo_print all print $d "$(step) $(temp) $(press) $(density) $(pxx) $(pyy) $(pzz) $(pxy) $(pxz) $(pyz) $(pe) $(ke) $(etotal) $(evdwl) $(ecoul) $(epair) $(ebond) $(eangle) $(edihed) $(eimp) $(emol) $(etail) $(enthalpy) $(vol)" &
+					append thermoNVT1000K_${fluid}_T${T}FP1atm.out screen no title "# step temp press density pxx pyy pzz pxy pxz pyz pe ke etotal evdwl ecoul epair ebond eangle edihed eimp emol etail enthalpy vol"
+dump            	1 all custom $d NVT1000K_u_${fluid}_T${T}FP1atm.lammpstrj id mol type xu yu zu mass q
+dump_modify     	1 sort id
+run            		250000
+undump          	1
+unfix				nvt1000K
+unfix               thermo_print
+write_restart   	NVT1000K_${fluid}_T${T}FP1atm.restart
+
+
+# NPT: Isothermal-isobaric ensemble to set the desired pressure; compute average density at that pressure
+fix 				NPT all npt temp ${eqmT} ${eqmT} 100.0 iso ${eqmP} ${eqmP} 25.0
+fix             	dave all ave/time $s $p $d v_rho ave running file eqmDensity_${fluid}_T${T}FP1atm.out
+thermo				$d
+thermo_style 		custom step temp press density pxx pyy pzz pxy pxz pyz pe ke etotal evdwl ecoul epair ebond eangle edihed eimp emol etail enthalpy vol
+fix 				thermo_print all print $d "$(step) $(temp) $(press) $(density) $(pxx) $(pyy) $(pzz) $(pxy) $(pxz) $(pyz) $(pe) $(ke) $(etotal) $(evdwl) $(ecoul) $(epair) $(ebond) $(eangle) $(edihed) $(eimp) $(emol) $(etail) $(enthalpy) $(vol)" &
+					append thermoNPT_${fluid}_T${T}FP1atm.out screen no title "# step temp press density pxx pyy pzz pxy pxz pyz pe ke etotal evdwl ecoul epair ebond eangle edihed eimp emol etail enthalpy vol"
+dump            	1 all custom $d NPT_u_${fluid}_T${T}FP1atm.lammpstrj id mol type xu yu zu mass q
+dump_modify     	1 sort id
+run					1000000
+undump          	1
+unfix				NPT
+unfix               thermo_print
+write_restart  		NPT_${fluid}_T${T}FP1atm.restart
+
+# NVT: Canonical ensemble to deform the box to match increase in P in previous step
+variable        	averho equal f_dave
+variable        	adjustrho equal (${rho}/${averho})^(1.0/3.0) # Adjustment factor needed to bring rho to averge rho
+unfix				dave
+fix             	NVT all nvt temp ${eqmT} ${eqmT} 100.0	
+fix             	adjust all deform 1 x scale ${adjustrho} y scale ${adjustrho} z scale ${adjustrho}
+thermo         		$d
+thermo_style 		custom step temp press density pxx pyy pzz pxy pxz pyz pe ke etotal evdwl ecoul epair ebond eangle edihed eimp emol etail enthalpy vol
+fix 				thermo_print all print $d "$(step) $(temp) $(press) $(density) $(pxx) $(pyy) $(pzz) $(pxy) $(pxz) $(pyz) $(pe) $(ke) $(etotal) $(evdwl) $(ecoul) $(epair) $(ebond) $(eangle) $(edihed) $(eimp) $(emol) $(etail) $(enthalpy) $(vol)" &
+					append thermoNVT_${fluid}_T${T}FP1atm.out screen no title "# step temp press density pxx pyy pzz pxy pxz pyz pe ke etotal evdwl ecoul epair ebond eangle edihed eimp emol etail enthalpy vol"
+dump            	1 all custom $d NVT_u_${fluid}_T${T}FP1atm.lammpstrj id mol type xu yu zu mass q
+dump_modify     	1 sort id
+run					500000
+undump          	1
+unfix				NVT
+unfix           	adjust
+unfix               thermo_print
+write_restart  		NVT_${fluid}_T${T}FP1atm.restart
+
+# NVE: Microcanonical ensemble to explore the configuration space at constant T and V; relax
+fix	       			NVE all nve
+fix 				thermostat all langevin ${eqmT} ${eqmT} 100.0 39847 
+thermo          	$d
+thermo_style 		custom step temp press density pxx pyy pzz pxy pxz pyz pe ke etotal evdwl ecoul epair ebond eangle edihed eimp emol etail enthalpy vol
+fix 				thermo_print all print $d "$(step) $(temp) $(press) $(density) $(pxx) $(pyy) $(pzz) $(pxy) $(pxz) $(pyz) $(pe) $(ke) $(etotal) $(evdwl) $(ecoul) $(epair) $(ebond) $(eangle) $(edihed) $(eimp) $(emol) $(etail) $(enthalpy) $(vol)" &
+					append thermoNVE_${fluid}_T${T}FP1atm.out screen no title "# step temp press density pxx pyy pzz pxy pxz pyz pe ke etotal evdwl ecoul epair ebond eangle edihed eimp emol etail enthalpy vol"
+run             	250000
+unfix           	NVE
+unfix 				thermostat
+unfix               thermo_print
+
+# Output the state genearted that needed to shear the molecules
+write_restart  		state_${fluid}_T${T}FP1atm.restart
+reset_timestep  	0
+
+############################# NPT: Production run ##########################################################################################
+fix 				NPT2 all npt temp ${eqmT} ${eqmT} 100.0 iso ${eqmP} ${eqmP} 25.0
+compute         	TT all temp
+compute         	myP all pressure TT
+
+variable        	myPxx equal c_myP[1]
+variable        	myPyy equal c_myP[2]
+variable       		myPzz equal c_myP[3]
+variable     		myPxy equal c_myP[4]
+variable     		myPxz equal c_myP[5]
+variable     		myPyz equal c_myP[6]
+
+# Also, output velocity profiles (vx) for production run
+fix  				5 all ave/time $s $p $d c_Press_Pair[*] ave one file Press_Pair_${fluid}_T${T}FP1atm.out
+fix  				6 all ave/time $s $p $d c_Press_Bond[*] ave one file Press_Bond_${fluid}_T${T}FP1atm.out
+fix  				7 all ave/time $s $p $d c_Press_Angle[*] ave one file Press_Angle_${fluid}_T${T}FP1atm.out
+fix  				8 all ave/time $s $p $d c_Press_Dihedral[*] ave one file Press_Dihedral_${fluid}_T${T}FP1atm.out
+fix  				9 all ave/time $s $p $d c_Press_Improper[*] ave one file Press_Improper_${fluid}_T${T}FP1atm.out
+fix  				10 all ave/time 1 1 1 c_myP[*] ave one file Press_All_AVGOne111_${fluid}_T${T}FP1atm.out
+fix  				11 all ave/time $s $p $d c_myP[*] ave one file Press_All_AVGOnespd_${fluid}_T${T}FP1atm.out
+
+# Addition parameters
+compute         	molchunk all chunk/atom molecule discard no                      			# chunk system based on molecule's IDs
+compute         	myCOM all com/chunk molchunk                      							# center of mass of each of the molecules (3/mol)
+compute 			myIten all inertia/chunk molchunk 											# calculates the inertia tensor (6/mol)
+compute         	myRG all gyration/chunk molchunk                              				# computes radius of gyration for each molecule (1/mol)
+compute         	myRGten all gyration/chunk molchunk tensor                          		# computes radius of gyration tensor for each molecule (6/mol)
+compute 			myShapeten all gyration/shape/chunk myRGten           						# calculates the eigenvalues of the gyration tensor and three shape parameters (6/mol)
+compute 			myDP all dipole/chunk molchunk 												# calculates the dipole vector and total dipole (4/mol)
+
+fix             	12 all ave/time $s $p $d c_myCOM[*] file com_${fluid}_T${T}FP1atm.out mode vector  				# average center of mass of molecules
+fix             	13 all ave/time $s $p $d c_myIten[*] file Itensor_${fluid}_T${T}FP1atm.out mode vector
+fix             	14 all ave/time $s $p $d c_myRG file RG_${fluid}_T${T}FP1atm.out mode vector   					# average radius of gyration for all molecules
+fix             	15 all ave/time $s $p $d c_myRGten[*] file RGtensor_${fluid}_T${T}FP1atm.out mode vector
+fix             	16 all ave/time $s $p $d c_myShapeten[*] file RGShapetensor_${fluid}_T${T}FP1atm.out mode vector
+fix             	17 all ave/time $s $p $d c_myDP[*] file Dipole_${fluid}_T${T}FP1atm.out mode vector
+
+
+thermo				$d
+thermo_style 		custom step temp press density pxx pyy pzz pxy pxz pyz pe ke etotal evdwl ecoul epair ebond eangle edihed eimp emol etail enthalpy vol
+fix 				thermo_print all print $d "$(step) $(temp) $(press) $(density) $(pxx) $(pyy) $(pzz) $(pxy) $(pxz) $(pyz) $(pe) $(ke) $(etotal) $(evdwl) $(ecoul) $(epair) $(ebond) $(eangle) $(edihed) $(eimp) $(emol) $(etail) $(enthalpy) $(vol)" &
+					append thermoNPT2_${fluid}_T${T}FP1atm.out screen no title "# step temp press density pxx pyy pzz pxy pxz pyz pe ke etotal evdwl ecoul epair ebond eangle edihed eimp emol etail enthalpy vol"
+dump            	1 all custom $d NPT2_u_${fluid}_T${T}FP1atm.lammpstrj id mol type xu yu zu mass q
+dump_modify     	1 sort id
+run					1000000
+undump          	1
+unfix				NPT2
+unfix               thermo_print
+write_restart  		NPT2_${fluid}_T${T}FP1atm.restart
+
+
+################################# CALL TO START NEXT LOOP #######################################
+clear
+next            	fluid
+jump 				in.eqm
